@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from data import db_session # модуль для работы с БД
 from data.users import User # модель ORM (информация о новом пользователе -> объект класса User -> запись в БД)
 
