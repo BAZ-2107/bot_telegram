@@ -9,14 +9,14 @@ from change_handlers import MoveHandlers
 from keyboard import Keyboards
 
 def start(update, context): # функция перезапуска бота
-    chat_id = update.message.chat_id # id пользователя
-    data.setLocation(chat_id, 'Меню')
-    handlers.change_handlers("Меню") # добавление обработчиков для тем    
+    chat_id = update.message.chat_id # id пользователя    
     if not data.isUser(chat_id):
         data.addUser(chat_id)
         message_text = f'Здравствуйте, "{update.message.chat.first_name}"! Вы находитесь в главном меню'
     else:
         message_text = "Вы в меню"
+    data.setLocation(chat_id, 'Меню')
+    handlers.change_handlers("Меню") # добавление обработчиков для тем
     update.message.reply_text(message_text, reply_markup=keyboards.main_keyboard) # сообщение пользователю
 
 def help(update, context):
@@ -64,7 +64,7 @@ def vikipediya(update, context): # функция взаимодействия �
     if data.getLocation(update.message.chat_id) != "Википедик":
         data.setLocation(update.message.chat_id, "Википедик")
         handlers.change_handlers("Википедик")     
-        update.message.reply_text("Введите ваш запрос", reply_markup=keyboards.vikipedia_keyboard)
+        update.message.reply_text("Введите ваш запрос", reply_markup=keyboards.in_menu_keyboard)
     else:
         message = update.message.text
         try:
