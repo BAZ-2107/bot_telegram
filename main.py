@@ -1,68 +1,86 @@
 # -*- coding: utf-8 -*-
-from telegram.ext import Updater, MessageHandler, Filters # импорт объектов
-from telegram.ext import CallbackContext, CommandHandler, ConversationHandler # импорт объектов
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove # импорт объектов
+from telegram.ext import Updater
+import requests
+import wikipedia
+wikipedia.set_lang("ru")
 
-from data import db_session # модуль для работы с БД
-from data.users import User # модель ORM (информация о новом пользователе -> объект класса User -> запись в БД)
+from connect_base import Data
+from change_handlers import MoveHandlers
+from keyboard import Keyboards
 
-
-
-class AboutUser: # создание класса, отслеживающего действия пользователя и хранящего его данные
-    opportunities = ["Переводчик", "Геокодер", "Википоиск"]
-
-    def __init__(self, user_id, username):
-        self.user_id = user_id; self.username = username
-        self.action = None # переменная для хранения действия пользователя
-    
-
-
-def start(update, context): # обработчик команды "start"
-    db_sess = db_session.create_session() # подключение к БД
-    user_id, name = update["message"]["chat"]["id"], update["message"]["chat"]["first_name"] # получение данных о пользователе
-    if str(user_id) not in [elem.user_id for elem in db_sess.query(User).all()]: # если такого пользователя еще не было
-        user = User(); user.user_id = user_id; user.name = name; db_sess.add(user); db_sess.commit() # то добавляем его
-        massiv.append(AboutUser(user_id, name)) # добавление пользователя в массив
-        update.message.reply_text("Здравствуйте, бот к вашим услугам. Я умею выполнять некоторые вещи",
-                                  reply_markup=ReplyKeyboardMarkup([[elem] for elem in new_user.opportunities]))
+def start(update, context): # функция перезапуска бота
+    chat_id = update.message.chat_id # id пользователя    
+    if not data.isUser(chat_id):
+        data.addUser(chat_id)
+        message_text = f'Здравствуйте, "{update.message.chat.first_name}"! Вы находитесь в главном меню'
     else:
-        update.message.reply_text("Вам нужна помощь? Тогда вызовите эту команду: /help")
+        message_text = "Вы в меню"
+    data.setLocation(chat_id, 'Меню')
+    handlers.change_handlers("Меню") # добавление обработчиков для тем
+    update.message.reply_text(message_text, reply_markup=keyboards.main_keyboard) # сообщение пользователю
 
 def help(update, context):
-    user = [user for user in massiv if str(user.user_id) == str(update["message"]["chat"]["id"])][0] # определение по id кто вызвал команду
-    update.message.reply_text(f'''Здравствуйте, "{user.username}"!
-Общение с ботом выглядит примерно таким образом:
-Пользователь выбирает какое-то действие и начинает на его тему общаться с ботом.
-Для того чтобы выйти из темы, пользователь должен набрать слово "стоп". С остальным проблем возникнуть не должно''')
-
-def messages(update, context): # обработчик сообщений без команд
-    user = [user for user in massiv if str(user.user_id) == str(update["message"]["chat"]["id"])][0] # определение по id кто вызвал команду
-    if user.action:# если пользователь что-то ввел и он уже в какой-то теме
-        if update.message.text.lower() == "выйти": user.action = None; update.message.reply_text('Меню', reply_markup=ReplyKeyboardMarkup([[elem] for elem in user.opportunities])) # пользователь вышел из какой-либо темы
-        elif user.action.lower() == "геокодер": geocoder(update, context)# пользователь в теме "геокодер"
-    elif update.message.text in user.opportunities: user.action = update.message.text # пользователь не был ни в одной теме, и он выбрал ее
+    update.message.reply_text(open("data\instruction.txt", encoding='utf-8').read())
 
 def geocoder(update, context):
-    if context.user_data:
-        pass
-    update.message.reply_text('')
+    data.setLocation(update.message.chat_id, "Геокодер")
+    handlers.change_handlers("Геокодер") # добавление обработчиков для тем
+    update.message.reply_text('''Вы в геокодере. Здесь есть 2 функции:
+1. Для отображения участка карты введите слово "Картинка", затем вводите координаты в формате: широта, долгота, затем вводите масштаб(1-17)
+2. Для отображения адреса через координаты введите слово "Адрес", затем координаты в формате: широта, долгота''', reply_markup=keyboards.geocoder_keyboard)
 
-def main(): # основная функция
-    updater = Updater("5193422398:AAFde7LeP50xSgtzBE33QWD3ctg9nDSkth0", use_context=True) # создание объекта, осуществляющего связь между ботом и пользрвателем
+def first_message(update, context): # когда программа заускается в первый раз, пользователь мог находиться уже в какой-то теме. Для перемещение его туда и создана эта функция
+    handlers.change_handlers(data.getLocation(update.message.chat_id)) # добавление обработчиков для тем
+    update.message.reply_text("Извините, я был выключен. Можете еще раз повторить?")
 
-    dp = updater.dispatcher # полученные сообщения передаются в диспетчер, а он их обрабатывает через обработчиков(функций)
+def geocoder_picture(update, context): # функция для отображения карты по заданным параметрам
+    if data.getLocation(update.message.chat_id) != "Геокодер-картинка":
+        data.setLocation(update.message.chat_id, "Геокодер-картинка")
+        handlers.change_handlers("Геокодер-картинка")     
+        update.message.reply_text("Введите координаты в формате: широта, долгота, затем введите масштаб (от 1 до 17)", reply_markup=keyboards.back_keyboard)
+    else: # пользователь вводит что-то
+        try:
+            message = update.message.text.split()
+            map_request = f"http://static-maps.yandex.ru/1.x/?ll={float(message[1])},{float(message[0])}&z={int(message[-1])}&l=sat,skl&size=450,450"
+            context.bot.send_photo(update.message.chat_id, map_request)
+        except Exception:
+            update.message.reply_text("Входные данные некорректны")
 
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, messages, pass_user_data=True)) # добавление обработчика сообщений без команд
-    dp.add_handler(CommandHandler("start", start)) # добавление обработчика команды "start"
-    dp.add_handler(CommandHandler("help", help)) # добавление обработчика команды "help"
+def geocoder_address(update, context): # функция для показа адреса объекта по заданным координатам
+    if data.getLocation(update.message.chat_id) != "Геокодер-адресовик":
+        data.setLocation(update.message.chat_id, "Геокодер-адресовик")
+        handlers.change_handlers("Геокодер-адресовик")     
+        update.message.reply_text("Введите координаты в формате: широта, долгота", reply_markup=keyboards.back_keyboard)
+    else:
+        try:
+            message = update.message.text.split()
+            apikey = "40d1649f-0493-4b70-98ba-98533de7710b"
+            geocoder_request = f"https://geocode-maps.yandex.ru/1.x/?apikey={apikey}&geocode={','.join(elem for elem in message[::-1])}&format=json"
+            update.message.reply_text(requests.get(geocoder_request).json()["response"]["GeoObjectCollection"]["featureMember"][0]["GeoObject"]["metaDataProperty"]["GeocoderMetaData"]["text"])
+        except Exception:
+            update.message.reply_text("Входные данные некорректны")
 
-    
-    updater.start_polling() # начало работы объекта
-    updater.idle() # прекращение работы объекта
+def vikipediya(update, context): # функция взаимодействия с википедией
+    if data.getLocation(update.message.chat_id) != "Википедик":
+        data.setLocation(update.message.chat_id, "Википедик")
+        handlers.change_handlers("Википедик")     
+        update.message.reply_text("Введите ваш запрос", reply_markup=keyboards.in_menu_keyboard)
+    else:
+        message = update.message.text
+        try:
+            update.message.reply_text(wikipedia.summary(message))
+        except Exception:
+            update.message.reply_text(f'По запросу "{message}" ничего не найдено')
 
 
 if __name__ == '__main__': # запуск программы
-    db_session.global_init("db/blogs.db") # Создание БД, если еще не создана
-    db_sess = db_session.create_session() # подключение к БД
-    massiv = [AboutUser(user.user_id, user.name) for user in db_sess.query(User).all()] # массив с пользователями
-    main() # запуск основной функции
+    TOKEN = "5193422398:AAFde7LeP50xSgtzBE33QWD3ctg9nDSkth0" # токен бота
+    data = Data() # создание объекта для взаимодействия с БД
+    keyboards = Keyboards() # создание объекта с клавиатурами
+    updater = Updater(token=TOKEN, use_context=True) # создание объекта, осуществляющего связь между ботом и пользователем
+    handlers = MoveHandlers(updater, start=start, help=help, geocoder=geocoder, first_message=first_message, 
+                            geocoder_picture=geocoder_picture, geocoder_address=geocoder_address, vikipediya=vikipediya)
+    handlers.addMainCommands()
+    handlers.addFirst()
+    updater.start_polling() # начало работы объекта
+    updater.idle() # прекращение работы объекта
